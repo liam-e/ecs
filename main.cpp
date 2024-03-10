@@ -28,8 +28,8 @@ class Component {
 class Entity {
     public:
         std::unordered_map<std::type_index, Component*> components;
-        
-        template<typename T>
+
+        template <typename T>
         bool hasComponent() {
             return components.find(typeid(T)) != components.end();
         }
@@ -40,14 +40,14 @@ class System {
     public:
         std::vector<T> components;
 
-        T* addComponent(T component, Entity* entity) {
-            if (entity->hasComponent<T>()) {
+        T* addComponentToEntity(Entity* entity) {
+            if (entity->components.find(typeid(T)) != entity->components.end()){
                 printf("Entity already has component of type %s\n", typeid(T).name());
                 return static_cast<T*>(entity->components[typeid(T)]);
             }
 
-            T* newComponent = new T();
-            components.push_back(*newComponent);
+            components.emplace_back();
+            T *newComponent = &components.back();
 
             newComponent->entity = entity;
             entity->components[typeid(T)] = newComponent;
@@ -55,8 +55,8 @@ class System {
             return newComponent;
         }
 
-        void removeComponent(Entity* entity) {
-            if (!entity->hasComponent<T>()) {
+        void removeComponentFromEntity(Entity* entity) {
+            if (entity->components.find(typeid(T)) == entity->components.end()){
                 return;
             }
 
@@ -145,29 +145,29 @@ void testComponents(){
     Game *game = new Game();
 
     // INITIALISE SYSTEMS
-    game->addSystem<PositionSystem>();
-    game->addSystem<RenderSystem>();
+    PositionSystem *positionSystem = game->addSystem<PositionSystem>();
+    RenderSystem *renderSystem = game->addSystem<RenderSystem>();
 
     PlayerEntity *player = game->createEntity<PlayerEntity>();
 
-    game->getSystem<PositionSystem>()->addComponent(PositionComponent(10.f, 20.f), player);
+    game->getSystem<PositionSystem>()->addComponentToEntity(player);
 
     assertm(player->hasComponent<PositionComponent>(), "Player does not have PositionComponent!\n");
     assertm(player->components.size() == 1, "The size of components is not 1!\n");
 
-    game->getSystem<RenderSystem>()->addComponent(RenderComponent(), player);
+    game->getSystem<RenderSystem>()->addComponentToEntity(player);
 
     assertm(player->hasComponent<RenderComponent>(), "Player does not have RenderComponent!\n");
     assertm(player->components.size() == 2, "The size of components is not 2!\n");
 
     game->update(0.1f);
 
-    game->getSystem<PositionSystem>()->removeComponent(player);
+    game->getSystem<PositionSystem>()->removeComponentFromEntity(player);
 
     assertm(!player->hasComponent<PositionComponent>(), "Player still has PositionComponent!\n");
     assertm(player->components.size() == 1, "The size of components is not 1!\n");
 
-    game->getSystem<RenderSystem>()->removeComponent(player);
+    game->getSystem<RenderSystem>()->removeComponentFromEntity(player);
 
     assertm(!player->hasComponent<RenderComponent>(), "Player still has RenderComponent!\n");
     assertm(player->components.size() == 0, "The size of components is not 0!\n");
