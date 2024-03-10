@@ -4,13 +4,16 @@
 #include <stdio.h>
 #include <typeindex>
 #include <unordered_map>
+#include <map>
 #include <cassert>
+#include <algorithm>
+
 
 #define assertm(exp, msg) assert(((void)msg, exp))
 
 class Entity;
 class Component;
-class System;
+class Game;
 void testComponents();
 
 class Component {
@@ -25,43 +28,46 @@ class Component {
 class Entity {
     public:
         std::unordered_map<std::type_index, Component*> components;
-
-        Entity() {
-            printf("%s: Initialised\n", typeid(this).name());
-        }
         
-        template <typename T, typename... Args>
-        T* addComponent(Args&&... args) {
-            if (components.find(typeid(T)) != components.end()) { // FOUND EXISTING
-                printf("%s: Already has '%s'!\n", typeid(this).name(), typeid(T).name());
-                return (T*)components[typeid(T)];
-            }
-            T* newComponent = new T(std::forward<Args>(args)...);
-            newComponent->entity = this;
-            components[typeid(T)] = newComponent;
-            newComponent->init();
-            return newComponent;
-        }
-
-        template <typename T>
-        T* getComponent() {
-            if (components.find(typeid(T)) == components.end()) { // NOT FOUND
-                printf("%s: Cannot find Component of type '%s'!\n", typeid(this).name(), typeid(T).name());
-                return nullptr;
-            }
-            return (T*)components[typeid(T)];
-        }
-
-        template <typename T>
-        void removeComponent() {
-            components.erase(typeid(T));
-            printf("%s: Removed '%s'\n", typeid(this).name(), typeid(T).name());
+        template<typename T>
+        bool hasComponent() {
+            return components.find(typeid(T)) != components.end();
         }
 };
 
+template <typename T>
 class System {
     public:
-        std::vector<Component> components;
+        std::vector<T> components;
+
+        T* addComponent(T component, Entity* entity) {
+            if (entity->hasComponent<T>()) {
+                printf("Entity already has component of type %s\n", typeid(T).name());
+                return static_cast<T*>(entity->components[typeid(T)]);
+            }
+
+            T* newComponent = new T();
+            components.push_back(*newComponent);
+
+            newComponent->entity = entity;
+            entity->components[typeid(T)] = newComponent;
+
+            return newComponent;
+        }
+
+        void removeComponent(Entity* entity) {
+            if (!entity->hasComponent<T>()) {
+                return;
+            }
+
+            for (size_t i = 0; i < components.size(); i++) {
+                if (&components[i] == entity->components[typeid(T)]) {
+                    components.erase(components.begin() + i);
+                    break;
+                }
+            }
+            entity->components.erase(typeid(T));
+        }
 
         void update(float deltaTime) {
             for (size_t i = 0; i < components.size(); i++) {
@@ -74,62 +80,20 @@ class PositionComponent : public Component {
     public:
         float x, y;
 
-        PositionComponent() : x(0), y(0) {
-            printf("%s: Initialised at (%f, %f)\n", typeid(this).name(), x, y);
-        }
+        PositionComponent() : x(0), y(0) {}
 
-        PositionComponent(float _x, float _y) : x(_x), y(_y) {
-            printf("%s: Initialised at (%f, %f)\n", typeid(this).name(), x, y);
-        }
-
-        void update(float deltaTime) {
-            printf("%s: Updated\n", typeid(this).name());
-        }
+        PositionComponent(float _x, float _y) : x(_x), y(_y) {}
 };
 
-class RenderComponent : public Component {
-    public:
-        RenderComponent() {
-            printf("%s: Initialised\n", typeid(this).name());
-        }
+class RenderComponent : public Component {};
 
-        void update(float deltaTime) {
-            printf("%s: Updated\n", typeid(this).name());
-        }
-};
+using PositionSystem = System<PositionComponent>;
+using RenderSystem = System<RenderComponent>;
 
-class PositionSystem : public System {
-    public:
-        std::vector<PositionComponent> components;
-
-        PositionSystem() {
-            printf("%s: Initialised\n", typeid(this).name());
-        };
-};
-
-class RenderSystem : public System {
-    public:
-        std::vector<RenderComponent> components;
-
-        RenderSystem() {
-            printf("%s: Initialised\n", typeid(this).name());
-        };
-
-        void update(float deltaTime) {
-            printf("%s: Updated\n", typeid(this).name());
-        }
-};
-
-class GameEngine {
+class Game {
     public:
         std::vector<Entity> entities;
-        std::vector<System> systems;
-
-        void update(float deltaTime) {
-            for (size_t i = 0; i < systems.size(); i++) {
-                systems[i].update(deltaTime);
-            }
-        }
+        std::map<std::type_index, void*> systemMap;
         
         template<typename T>
         T* createEntity() {
@@ -141,65 +105,70 @@ class GameEngine {
         template<typename T>
         T* addSystem() {
             T* system = new T();
-            systems.push_back(*system);
+            systemMap[typeid(T)] = system;
             return system;
+        }
+
+        template<typename T>
+        bool hasSystem() {
+            return systemMap.find(typeid(T)) != systemMap.end();
+        }
+
+        template<typename T>
+        T* getSystem() {
+            if (!hasSystem<T>()) {
+                printf("System of type %s does not exist\n", typeid(T).name());
+                return nullptr;
+            }
+            return static_cast<T*>(systemMap[typeid(T)]);
+        }
+
+        void update(float deltaTime) {
+            for (const auto &pair : systemMap){
+                static_cast<System<Component>*>(pair.second)->update(deltaTime);
+            }
         }
 };
 
-class PlayerEntity : public Entity {
-};
+class PlayerEntity : public Entity {};
 
 
 int main(){
-    // TODO: Have entities 
-    // TODO: Use variadic function template for createEntity
-    // TODO: have component added to system
     testComponents();
+    
+    printf("All tests passed!\n");
+
     return 0;
 }
 
 void testComponents(){
-    GameEngine *gameEngine = new GameEngine();
+    Game *game = new Game();
 
     // INITIALISE SYSTEMS
-    gameEngine->addSystem<PositionSystem>();
-    gameEngine->addSystem<RenderSystem>();
+    game->addSystem<PositionSystem>();
+    game->addSystem<RenderSystem>();
 
-    PlayerEntity *player = gameEngine->createEntity<PlayerEntity>();
+    PlayerEntity *player = game->createEntity<PlayerEntity>();
 
-    assertm(player->components.size() == 0, "components is not empty!\n");
+    game->getSystem<PositionSystem>()->addComponent(PositionComponent(10.f, 20.f), player);
 
-    PositionComponent *pos = player->addComponent<PositionComponent>(0.1, 0.2);
-
-    assertm(pos, "Getting existing Component returned null!\n");
-    assertm(player->components.size() == 1, "The size of components is not 1!\n");
-    
-    PositionComponent *pos_b = player->getComponent<PositionComponent>();
-
-    assertm(pos_b, "Getting existing Component returned null!\n");
+    assertm(player->hasComponent<PositionComponent>(), "Player does not have PositionComponent!\n");
     assertm(player->components.size() == 1, "The size of components is not 1!\n");
 
-    RenderComponent *ren = player->getComponent<RenderComponent>();
+    game->getSystem<RenderSystem>()->addComponent(RenderComponent(), player);
 
-    assertm(!ren, "Getting non-existent Component did not return null!\n");
-    assertm(player->components.size() == 1, "The size of components is not 1!\n");
-
-    RenderComponent *ren_b = player->addComponent<RenderComponent>();
-
-    assertm(ren_b, "Getting existing Component returned null!\n");
+    assertm(player->hasComponent<RenderComponent>(), "Player does not have RenderComponent!\n");
     assertm(player->components.size() == 2, "The size of components is not 2!\n");
 
-    player->removeComponent<PositionComponent>();
+    game->update(0.1f);
 
+    game->getSystem<PositionSystem>()->removeComponent(player);
+
+    assertm(!player->hasComponent<PositionComponent>(), "Player still has PositionComponent!\n");
     assertm(player->components.size() == 1, "The size of components is not 1!\n");
-    
-    PositionComponent *pos_c = player->getComponent<PositionComponent>();
 
-    assertm(!pos_c, "Getting non-existent Component did not return null!\n");
+    game->getSystem<RenderSystem>()->removeComponent(player);
 
-    player->removeComponent<RenderComponent>();
-
+    assertm(!player->hasComponent<RenderComponent>(), "Player still has RenderComponent!\n");
     assertm(player->components.size() == 0, "The size of components is not 0!\n");
-
-    printf("Finished!\n");
 }
